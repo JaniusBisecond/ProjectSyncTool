@@ -1,0 +1,12 @@
+# 仓库内统一使用 LF，避免不同机器上产生无意义的换行差异
+* text=auto
+
+# Visual Studio 工程文件在检出时使用 CRLF
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.vcxproj.filters text eol=crlf
+
+# 二进制
+*.exe binary
+*.pdb binary
+*.png binary

@@ -1,0 +1,27 @@
+# 构建产物
+x64/
+[Dd]ebug/
+[Rr]elease/
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.idb
+*.iobj
+*.ipdb
+*.exp
+*.lib
+
+# Visual Studio
+.vs/
+*.user
+*.aps
+*.suo
+
+# 本地运行产物 / 个人配置
+sync.ini
+settings.ini
+yusha.ini
+logs/
+_sync-backup/
+*.log
