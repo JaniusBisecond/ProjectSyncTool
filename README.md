@@ -90,7 +90,3 @@ ProjectSyncTool/
 
 - 核心层不依赖 ImGui；界面层每帧只读控制器快照（按 revision 决定是否重新拉取），所有耗时操作都在 worker 线程，界面不会卡死
 - 界面文案与日志为中文，中文字体在启动时从 `C:\Windows\Fonts` 加载
-
-## 许可
-
-本仓库尚未指定开源许可。使用的 [Dear ImGui](https://github.com/ocornut/imgui) 为 MIT 许可，不随本仓库分发。
