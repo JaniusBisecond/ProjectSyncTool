@@ -96,6 +96,55 @@ void OpenWithShell(const std::wstring& target)
 	::ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+// 在资源管理器中定位 root\rel：文件存在则选中它，否则打开最近的已存在目录。
+// 返回实际打开的路径；返回空表示该侧根目录不可用。
+std::wstring RevealInExplorer(const std::wstring& root, const std::wstring& rel)
+{
+	if (root.empty() || rel.empty())
+	{
+		return std::wstring();
+	}
+
+	const std::wstring full = JoinPath(root, rel);
+	std::error_code ec;
+	if (std::filesystem::is_regular_file(std::filesystem::path(full), ec))
+	{
+		// /select 的路径带空格时必须加引号，整串作为 explorer 的参数
+		const std::wstring args = L"/select,\"" + full + L"\"";
+		::ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+		return full;
+	}
+
+	// 该侧没有这个文件（新增项的目标侧 / 删除项的源侧）：向上退到最近的已存在目录，不越过 root
+	std::filesystem::path dir = std::filesystem::path(full).parent_path();
+	const std::filesystem::path rootPath = std::filesystem::path(TrimTrailingSlash(root));
+	while (dir != rootPath && dir.has_parent_path() && !std::filesystem::is_directory(dir, ec))
+	{
+		dir = dir.parent_path();
+	}
+	if (dir.empty() || !std::filesystem::is_directory(dir, ec))
+	{
+		return std::wstring();
+	}
+
+	OpenWithShell(dir.wstring());
+	return dir.wstring();
+}
+
+// 把非空说明追加到汇总文本，多条之间用「；」分隔
+void AppendNotice(std::wstring& text, const std::wstring& note)
+{
+	if (note.empty())
+	{
+		return;
+	}
+	if (!text.empty())
+	{
+		text += L"；";
+	}
+	text += note;
+}
+
 std::string ToUtf8String(const std::wstring& text)
 {
 	return ToUtf8(text);
@@ -399,6 +448,11 @@ void AppUi::DrawSyncTab()
 
 	DrawExecutionResult();
 
+	if (!revealNotice_.empty())
+	{
+		ImGui::TextColored(ImVec4(0.60f, 0.85f, 1.00f, 1.0f), "%s", ToUtf8String(revealNotice_).c_str());
+	}
+
 	// ---- 过滤与选择（方向不匹配时整块灰显且不可操作）----
 	if (listDisabled)
 	{
@@ -516,6 +570,10 @@ void AppUi::DrawSyncTab()
 			}
 			ImGui::PopID();
 
+			// 本行内容条的纵向范围：右键命中判断用（各列等高，取第 0 项即可）
+			const ImVec2 rowRectMin = ImGui::GetItemRectMin();
+			const ImVec2 rowRectMax = ImGui::GetItemRectMax();
+
 			ImGui::TableSetColumnIndex(1);
 			if (row.IsDelete)
 			{
@@ -545,6 +603,19 @@ void AppUi::DrawSyncTab()
 			{
 				ImGui::TextDisabled("-> %s", ToUtf8String(snap_.DstLabel).c_str());
 			}
+
+			// ---- 右键任意一列：在 A / B 中定位该文件（列表灰显时随 disabled 一并不可用）----
+			ImGui::PushID(i);
+			const float rowPadY = ImGui::GetStyle().CellPadding.y;
+			const float mouseY = ImGui::GetMousePos().y;
+			if (ImGui::TableGetHoveredColumn() >= 0
+			    && mouseY >= rowRectMin.y - rowPadY && mouseY <= rowRectMax.y + rowPadY
+			    && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+			{
+				ImGui::OpenPopup("##rowmenu");
+			}
+			DrawDiffRowMenu(row);
+			ImGui::PopID();
 		}
 	}
 
@@ -556,6 +627,67 @@ void AppUi::DrawSyncTab()
 	}
 
 	FlushSelection();
+}
+
+// 差异行右键菜单。ID 由调用方 PushID(行号) 区分，内部只认 "##rowmenu"
+void AppUi::DrawDiffRowMenu(const DisplayRow& row)
+{
+	if (!ImGui::BeginPopup("##rowmenu"))
+	{
+		return;
+	}
+
+	// 用扫描时的配置：A / B 是物理目录，与当前同步方向无关
+	const SyncConfig config = controller_.GetConfig();
+	const std::wstring nameA = LeafName(config.RootA, L"文件夹 A");
+	const std::wstring nameB = LeafName(config.RootB, L"文件夹 B");
+
+	ImGui::TextDisabled("%s", ToUtf8String(row.Item->Rel).c_str());
+	ImGui::Separator();
+
+	const std::string openA = "在 " + ToUtf8String(nameA) + " 中打开";
+	const std::string openB = "在 " + ToUtf8String(nameB) + " 中打开";
+	if (ImGui::MenuItem(openA.c_str(), nullptr, false, !config.RootA.empty()))
+	{
+		revealNotice_ = RevealInSide(config.RootA, nameA, row.Item->Rel);
+	}
+	if (ImGui::MenuItem(openB.c_str(), nullptr, false, !config.RootB.empty()))
+	{
+		revealNotice_ = RevealInSide(config.RootB, nameB, row.Item->Rel);
+	}
+
+	ImGui::Separator();
+	if (ImGui::MenuItem("同时打开两个文件夹", nullptr, false, !config.RootA.empty() && !config.RootB.empty()))
+	{
+		RevealInBothSides(config, row.Item->Rel);
+	}
+
+	ImGui::EndPopup();
+}
+
+// 在某一侧定位文件；返回给用户的说明（空 = 该侧已精确选中文件，无需提示）
+std::wstring AppUi::RevealInSide(const std::wstring& root, const std::wstring& sideName, const std::wstring& rel)
+{
+	const std::wstring opened = RevealInExplorer(root, rel);
+	if (opened.empty())
+	{
+		return L"无法打开该侧目录：" + root;
+	}
+
+	// 该侧没有这个文件时打开的是上层目录，明确提示，避免看起来像定位错了
+	const std::wstring full = JoinPath(root, rel);
+	if (IEquals(opened, full))
+	{
+		return std::wstring();
+	}
+	return sideName + L" 侧没有 " + rel + L"，已打开 " + opened;
+}
+
+void AppUi::RevealInBothSides(const SyncConfig& config, const std::wstring& rel)
+{
+	revealNotice_.clear();
+	AppendNotice(revealNotice_, RevealInSide(config.RootA, LeafName(config.RootA, L"文件夹 A"), rel));
+	AppendNotice(revealNotice_, RevealInSide(config.RootB, LeafName(config.RootB, L"文件夹 B"), rel));
 }
 
 void AppUi::DrawExecutionResult()
@@ -846,6 +978,7 @@ void AppUi::DrawPreflightModal()
 
 void AppUi::RequestCompare()
 {
+	revealNotice_.clear();
 	controller_.StartScan(direction_, true);
 }
 

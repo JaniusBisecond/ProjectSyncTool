@@ -51,6 +51,11 @@ private:
 	void FlushSelection();					// 把勾选变化交回控制器
 	void ApplySelectionPolicy(int policy);	// 0 全选 1 全不选 2 反选 3 仅新增覆盖
 
+	// 差异行右键菜单：在 A / B 侧的资源管理器中定位该文件
+	void DrawDiffRowMenu(const DisplayRow& row);
+	std::wstring RevealInSide(const std::wstring& root, const std::wstring& sideName, const std::wstring& rel);
+	void RevealInBothSides(const SyncConfig& config, const std::wstring& rel);
+
 	void DrawRoot();
 	void DrawSyncTab();
 	void DrawConfigTab();
@@ -80,6 +85,7 @@ private:
 	std::wstring settingsPath_;
 	std::wstring logDir_;
 	std::wstring notice_;
+	std::wstring revealNotice_;		// 右键「在 A / B 中打开」的结果提示（同步页显示）
 
 	// 配置页编辑缓冲（UTF-8）
 	std::string editA_;
